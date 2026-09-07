@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>课程表</title>
+<style>
+:root{
+  --bg:#f4f6fa; --card:#fff; --line:#e3e8f0; --text:#1f2733; --muted:#8a93a6;
+  --accent:#3b6fe0; --today:#fff8e1; --hol:#fdeaea;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;background:var(--bg);color:var(--text);padding:14px;display:flex;justify-content:center}
+.wrap{width:min(1240px,100%)}
+#grid{margin:0 auto}
+header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px}
+h1{font-size:22px}
+#stats{color:var(--muted);font-size:13px;margin-left:6px}
+#wkbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 12px}
+#wkLabel{font-size:15px;font-weight:700;color:#334155;background:#eef2f9;border-radius:8px;padding:5px 14px}
+#wkLabel small{display:block;font-size:11px;color:var(--muted);font-weight:normal}
+/* 限时任务横条（日期窗口内任选一天完成，显示在每周末顶部） */
+#taskbar{display:flex;flex-direction:column;gap:6px;margin:0 0 8px}
+.task-item{display:flex;align-items:center;gap:10px;background:#fff8e6;border:1px solid #e9cf8f;border-radius:10px;padding:8px 12px;font-size:13px;cursor:pointer;flex-wrap:wrap}
+.task-item:hover{border-color:#d9b458}
+.task-item .t-name{font-weight:700}
+.task-item .t-meta{color:#8a6d1f;font-size:12px}
+.task-item .t-due{margin-left:auto;color:#b8860b;font-size:12px;font-weight:600;white-space:nowrap}
+.navbtn{background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 12px;font-size:13px;cursor:pointer;color:#4a5568}
+.navbtn:hover{border-color:var(--accent);color:var(--accent)}
+.spacer{flex:1}
+.btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:13px;cursor:pointer}
+.btn:hover{filter:brightness(1.1)}
+.btn.ghost{background:#fff;color:var(--accent);border:1px solid var(--accent)}
+/* ===== 日历式时间轴布局 ===== */
+.cal-head{display:flex;gap:6px;margin-bottom:6px}
+.cal-head-cell{flex:1;text-align:center;font-size:13px;font-weight:700;color:#334155;background:#eef2f9;border-radius:8px;padding:5px 0}
+.cal-head-cell span{display:block;font-size:10.5px;color:var(--muted);font-weight:normal}
+.cal-head-cell .hol{color:#e06c5f}
+.cal-head-cell.today{background:var(--today);color:#a06a00}
+.cal{position:relative;display:flex;gap:6px;background:var(--card);border-radius:12px;padding:8px 8px 18px;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+.cal-day{flex:1;position:relative;border-radius:8px;padding:0 4px;
+  background-image:repeating-linear-gradient(to bottom, transparent 0, transparent 50px, #eef2f8 50px, #eef2f8 51px)}
+.cal-day.today{background-color:var(--today)}
+.cal-day.hol-day{background-image:repeating-linear-gradient(to bottom, transparent 0, transparent 50px, #f3e3e3 50px, #f3e3e3 51px);background-color:#fdf6f6}
+.cal-empty{position:absolute;top:8px;left:0;right:0;text-align:center;color:#c3c9d4;font-size:12px}
+.cal-gap{position:absolute;left:0;right:0;text-align:center;color:#a5b0c2;font-size:10px;line-height:1.35;transform:translateY(-50%);pointer-events:none}
+.cal-gap .arrow{font-size:14px;display:block}
+.cal-course{position:absolute;left:4px;right:4px;border-radius:8px;padding:6px 9px;font-size:11px;cursor:pointer;color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.18);overflow:hidden;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}
+.cal-course .time{font-size:10.5px;font-weight:600;opacity:.95}
+.cal-course .name{font-weight:800;font-size:16px;margin:3px 0;text-shadow:0 1px 2px rgba(0,0,0,.2);word-break:break-word;max-width:100%}
+.cal-course .name .sub{display:block;font-size:13.5px;font-weight:600;opacity:.95;margin-top:1px}
+.cal-course .dur{font-size:10px;opacity:.9}
+.cal-course .loc{opacity:.92;font-size:10px;margin-top:1px}
+.wkchip{position:absolute;top:2px;right:3px;background:rgba(0,0,0,.25);border-radius:4px;padding:0 4px;font-size:9px;line-height:1.5}
+.hol-banner{position:absolute;top:12px;left:0;right:0;text-align:center;color:#e06c5f;font-size:12px;font-weight:700}
+footer{text-align:center;color:#9aa4b8;font-size:12px;margin-top:12px}
+/* ===== 手机适配 ===== */
+@media (max-width: 768px){
+  body{padding:10px}
+  h1{font-size:18px}
+  #wkbar{position:sticky;top:0;z-index:5;background:var(--bg);padding:6px 0}
+  .cal{overflow-x:auto}
+  .cal-day{min-width:132px}
+  .cal-head{overflow-x:auto}
+  .cal-head-cell{min-width:132px}
+}
+.retry{background:var(--accent);color:#fff;border:none;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer}
+#overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:10}
+#popup{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;border-radius:12px;padding:18px 20px;z-index:11;min-width:300px;max-width:92vw;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+#popup h3{margin-bottom:10px}
+#popup p{font-size:13px;margin:4px 0}
+#popup .del{background:#d9534f;color:#fff;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px}
+#popup .editbtn{background:#5b8def;color:#fff;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px}
+#popup .close{background:#eee;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px;margin-right:8px}
+#panel{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;border-radius:12px;padding:18px 20px;z-index:11;min-width:360px;max-width:94vw;max-height:90vh;overflow:auto;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+#panel h3{margin-bottom:12px}
+#panel label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
+#panel input,#panel select,#panel textarea{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit}
+#panel textarea{resize:vertical}
+#panel .row{display:flex;gap:8px}
+#panel .row div{flex:1}
+#panel .actions{margin-top:14px;text-align:right}
+#popup .detailbox{background:#f6f8fc;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.7;margin-top:6px;white-space:pre-line;max-height:180px;overflow:auto}
+.hint{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.5}
+@media print{
+  body{background:#fff;padding:0}
+  .btn,.navbtn,#panel,#overlay,#popup,footer,#cfgBtn,#addBtn{display:none!important}
+  #wkLabel{border:none;background:none;padding:0}
+  .cal{box-shadow:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>📅 课程表</h1>
+  <div id="stats"></div>
+</header>
+<div id="wkbar">
+  <button class="navbtn" onclick="navWeek(-1)">‹ 上一周</button>
+  <div id="wkLabel"></div>
+  <button class="navbtn" onclick="navWeek(1)">下一周 ›</button>
+  <button class="navbtn" id="backBtn" onclick="goCurWeek()" style="display:none">📌 回到本周</button>
+  <span class="spacer"></span>
+  <button class="btn ghost" id="cfgBtn" onclick="openCfg()">⚙️ 校历设置</button>
+  <button class="btn" id="addBtn" onclick="openForm()">＋ 添加</button>
+</div>
+<div id="grid"></div>
+<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据仅保存在你自己的浏览器，绝不上传 · Ctrl+P 可打印<br>v1.0.0</footer>
+</div>
+
+<div id="overlay" onclick="closeAll()"></div>
+<div id="popup"></div>
+<div id="panel" style="display:none">
+  <div id="formArea">
+    <h3 id="formTitle">添加课程 / 活动</h3>
+    <label>名称</label>
+    <input id="fName" placeholder="例如：UCMP6050、学术讲座、安全培训">
+    <div class="row">
+      <div><label>星期</label><select id="fDay"></select></div>
+      <div><label>开始时间</label><input id="fStart" type="time" value="09:00"></div>
+      <div><label>结束时间</label><input id="fEnd" type="time" value="10:20"></div>
+    </div>
+    <div class="row">
+      <div><label>地点</label><input id="fLoc" placeholder="可选"></div>
+      <div><label>老师 / 主办</label><input id="fTea" placeholder="可选"></div>
+    </div>
+    <label>上课周次</label>
+    <select id="fWk" onchange="wkSelectChange()">
+      <option value="w">每周都上</option>
+      <option value="o">单周上（第1、3、5…周）</option>
+      <option value="e">双周上（第2、4、6…周）</option>
+      <option value="l">指定周次（如 3-8,10）</option>
+      <option value="d">只在某一天（单次活动）</option>
+      <option value="r">限时任务（某段日期内任选一天完成）</option>
+    </select>
+    <div id="fWkListRow" style="display:none"><label>第几周到第几周（可写 7-20 或 3,5,7-9）</label>
+      <input id="fWkList" placeholder="例：7-20 或 3,5,7-9"></div>
+    <div id="fWkDateRow" style="display:none"><label>日期</label>
+      <input id="fWkDate" type="date"></div>
+    <div id="fWkRangeRow" style="display:none"><label>任选完成时间段（开始 ~ 截止）</label>
+      <div class="row">
+        <div><input id="fWkA" type="date"></div>
+        <div><input id="fWkB" type="date"></div>
+      </div>
+    </div>
+    <div class="hint" id="wkHint">大小周的课（如单双周）会自动按第1周=单周计算；假期日期自动停课；限时任务显示为每周顶部横条。</div>
+    <label>课程详情（作业 / pre / 备注，每行一条）</label>
+    <textarea id="fDetail" rows="4" placeholder="例：
+第2周 交HW1
+第4周 小组pre
+期末 交报告"></textarea>
+    <div class="actions">
+      <button class="close btn ghost" onclick="closeAll()">取消</button>
+      <button class="btn" onclick="saveCourse()">保存</button>
+    </div>
+  </div>
+  <div id="cfgArea" style="display:none">
+    <h3>⚙️ 校历设置</h3>
+    <div class="row">
+      <div><label>第1周从哪天开始</label><input id="cfgStart" type="date"></div>
+      <div><label>本学期共几周</label><input id="cfgWeeks" type="number" min="1" max="30"></div>
+    </div>
+    <label>假期（每行：开始日期,结束日期,名称）</label>
+    <textarea id="cfgHolidays" rows="4" placeholder="2026-09-25,2026-09-27,中秋节"></textarea>
+    <div class="hint">假期内的课自动跳过；第1周起算日的奇偶决定「单周/双周」从哪周开始。</div>
+    <div class="actions">
+      <button class="btn ghost" onclick="closeAll()">取消</button>
+      <button class="btn" onclick="saveCfg()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ================= 周次化课表（数据保存在浏览器，假期自动停课，支持大小周/单次活动） =================
+const DAYS = ["周一","周二","周三","周四","周五","周六","周日"];
+const storeKey = "timetable.v23";
+const cfgKey = "timetable.cfg.v23";
+
+// ---------- 校历配置 ----------
+// 默认"第1周"= 最近一个周一（点 ⚙️ 校历设置 改成自己学校的开学周即可）
+function defaultTermStart(){
+  const n = new Date(), w = (n.getDay()+6)%7;
+  const m = new Date(n.getFullYear(), n.getMonth(), n.getDate()-w);
+  return m.getFullYear() + "-" + String(m.getMonth()+1).padStart(2,"0") + "-" + String(m.getDate()).padStart(2,"0");
+}
+const DEF_CFG = {
+  termStart: defaultTermStart(),   // 第1周的周一（按自己学校校历修改）
+  totalWeeks: 20,
+  holidays: []                     // 假期自动停课，格式：{s:"2026-10-01", e:"2026-10-07", n:"国庆节"}
+};
+function loadCfg(){
+  let c = JSON.parse(JSON.stringify(DEF_CFG));
+  try{ const raw = localStorage.getItem(cfgKey); if(raw) c = Object.assign(c, JSON.parse(raw)); }catch(e){}
+  if(!Array.isArray(c.holidays)) c.holidays = DEF_CFG.holidays;
+  return c;
+}
+const CFG = loadCfg();
+
+// ---------- 数据 ----------
+let courses = [];
+try{
+  const raw = localStorage.getItem(storeKey) || localStorage.getItem("timetable.v22") || localStorage.getItem("timetable.v21");
+  if(raw) courses = JSON.parse(raw);
+}catch(e){ courses = []; }
+for(const c of courses){ if(!c.id) c.id = Math.floor(Math.random()*1000000000) + Date.now()%1000000; }
+function save(){ localStorage.setItem(storeKey, JSON.stringify(courses)); }
+
+// URL 参数快速添加：?add=名称|星期|开始|结束|地点|周次|备注   （周次可空=每周；单次如 d:2026-09-08）
+(function(){
+  try{
+    const q = new URLSearchParams(location.search);
+    const add = q.get("add");
+    if(add){
+      const p = add.split("|");
+      if(p.length >= 4){
+        courses.push({
+          id: Date.now(),
+          name: p[0], d: +p[1], start: p[2], end_time: p[3],
+          loc: p[4] || "", tea: "",
+          wk: p[5] || "w", detail: p[6] || ""
+        });
+        save();
+        history.replaceState(null, "", location.pathname);
+      }
+    }
+  }catch(e){}
+})();
+
+// ---------- 日期工具 ----------
+const DAY_MS = 86400000;
+function parseD(s){ const p = s.split("-"); return new Date(+p[0], +p[1]-1, +p[2]); }
+function addDays(d, n){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()+n); }
+function fmtMD(d){ return (d.getMonth()+1) + "/" + d.getDate(); }
+function fmtYMD(d){ return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); }
+function termStartDate(){ return parseD(CFG.termStart); }
+function weekOfDate(d){ return Math.floor((d - termStartDate())/DAY_MS / 7) + 1; }
+function weekStartDate(n){ return addDays(termStartDate(), (n-1)*7); }
+function curWeek(){
+  const n = weekOfDate(new Date());
+  return Math.max(1, Math.min(CFG.totalWeeks, n));
+}
+function holidayOn(d){
+  const y = fmtYMD(d);
+  for(const h of CFG.holidays){
+    if(y >= h.s && y <= h.e) return h.n;
+  }
+  return null;
+}
+// 周次规则判断：c.wk → 'w' 每周 | 'o' 单周 | 'e' 双周 | 'l:范围' 指定周次 | 'd:日期' 单次
+function wkMatchN(wk, n){
+  if(!wk || wk === "w") return true;
+  if(wk === "o") return n % 2 === 1;
+  if(wk === "e") return n % 2 === 0;
+  if(wk.indexOf("l:") === 0){
+    const parts = wk.slice(2).split(",");
+    for(const p of parts){
+      if(!p) continue;
+      const m = p.split("-");
+      if(m.length === 2){ const a=+m[0], b=(m[1]==="")?CFG.totalWeeks:(+m[1]); if(n>=a && n<=b) return true; }
+      else if(+p === n) return true;
+    }
+    return false;
+  }
+  return true;
+}
+function wkMatchDate(wk, d){ return !!wk && wk.indexOf("d:") === 0 && wk.slice(2) === fmtYMD(d); }
+// 该课程在 (week N, date d 这天) 是否上课（限时任务 r: 不占格子，返回 false）
+function onThisDay(c, n, d){
+  if(holidayOn(d)) return false;
+  if(!c.wk || c.wk === "w" || c.wk === "o" || c.wk === "e" || c.wk.indexOf("l:") === 0){
+    return n >= 1 && n <= CFG.totalWeeks && wkMatchN(c.wk, n);
+  }
+  if(c.wk.indexOf("d:") === 0) return wkMatchDate(c.wk, d);
+  return false;
+}
+// 限时任务窗口是否与 (weekStart 起的这一周) 相交
+function taskInWeek(c, weekStart){
+  if(!c.wk || c.wk.indexOf("r:") !== 0) return false;
+  const p = c.wk.slice(2).split("|");
+  if(p.length < 2 || !p[0] || !p[1]) return false;
+  const a = p[0], b = p[1];
+  const ws = fmtYMD(weekStart), we = fmtYMD(addDays(weekStart, 6));
+  return a <= we && b >= ws; // YYYY-MM-DD 字典序即日期序
+}
+function taskWinTxt(wk){
+  const p = wk.slice(2).split("|");
+  return (p[0] || "") + " ~ " + (p[1] || "");
+}
+function wkLabelTxt(wk){
+  if(!wk || wk === "w") return "";
+  if(wk === "o") return "单周";
+  if(wk === "e") return "双周";
+  if(wk.indexOf("l:") === 0) return wk.slice(2).replace(/,/g, ",");
+  if(wk.indexOf("d:") === 0) return "单次";
+  return "";
+}
+function wkDetailTxt(wk){
+  if(!wk || wk === "w") return "每周";
+  if(wk === "o") return "单周（第1、3、5…周）";
+  if(wk === "e") return "双周（第2、4、6…周）";
+  if(wk.indexOf("l:") === 0) return "第 " + wk.slice(2) + " 周";
+  if(wk.indexOf("d:") === 0){
+    const d = parseD(wk.slice(2));
+    return fmtYMD(d) + "（" + DAYS[(d.getDay()+6)%7] + "）单次";
+  }
+  if(wk.indexOf("r:") === 0) return "限时任务：" + taskWinTxt(wk) + " 内任选一天完成";
+  return "";
+}
+
+// ---------- 视图 ----------
+let editId = null;
+let wkView = curWeek();   // 当前查看的第几周
+let todayIdx = (new Date().getDay()+6)%7;
+
+function navWeek(delta){ wkView = Math.max(1, Math.min(CFG.totalWeeks, wkView + delta)); render(); }
+function goCurWeek(){ wkView = curWeek(); render(); }
+
+function dayColor(name){
+  let h = 0;
+  for(const ch of name) h = (h*31 + ch.charCodeAt(0)) % 360;
+  return "hsl(" + h + ", 62%, 55%)";
+}
+function toMin(t){ const p = t.split(":"); return (+p[0])*60 + (+p[1]); }
+function splitName(name){
+  const idx = name.indexOf("（");
+  if(idx > 0) return { main: name.slice(0, idx), sub: name.slice(idx) };
+  return { main: name, sub: "" };
+}
+function esc(s){ return (s||"").replace(/[&<>"]/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m])); }
+
+function calCard(c, top, h){
+  const mins = toMin(c.end_time) - toMin(c.start);
+  const dur = Math.floor(mins/60) + "H" + (mins%60) + "min";
+  const locTxt = c.loc ? "地点：" + esc(c.loc) : (c.tea ? "老师：" + esc(c.tea) : "");
+  const compact = h < 80;
+  const sp = splitName(c.name);
+  const chip = wkLabelTxt(c.wk);
+  return "<div class='cal-course' style='background:" + dayColor(c.name) + ";top:" + top + "px;height:" + h + "px' onclick='showDetail(" + c.id + ")'>" +
+    (chip ? "<span class='wkchip'>" + esc(chip) + "</span>" : "") +
+    "<div class='time'>时间：" + c.start + "–" + c.end_time + "</div>" +
+    "<div class='name'>" + esc(sp.main) +
+    (sp.sub ? "<span class='sub'>" + esc(sp.sub) + "</span>" : "") + "</div>" +
+    (!compact ? "<div class='dur'>时长：" + dur + "</div>" : "") +
+    (!compact && locTxt ? "<div class='loc'>" + locTxt + "</div>" : "") + "</div>";
+}
+
+function render(){
+  const cw = curWeek();
+  const isCur = wkView === cw;
+  const start = weekStartDate(wkView);
+
+  // 统计
+  let cnt = 0, holDays = [], taskCnt = 0;
+  const tasks = [];
+  for(let i=0;i<7;i++){
+    const d = addDays(start, i);
+    const h = holidayOn(d);
+    if(h && holDays.indexOf(h) < 0) holDays.push(h);
+    for(const c of courses){
+      if(c.d === i+1 && onThisDay(c, wkView, d)) cnt++;
+    }
+  }
+  for(const c of courses){ if(taskInWeek(c, start)){ taskCnt++; tasks.push(c); } }
+  const statsTxt = "本周 " + cnt + " 节课" +
+    (taskCnt ? " · 📋 限时任务 " + taskCnt + " 项" : "") +
+    (holDays.length ? " · 🎉 " + holDays.join("、") + "放假" : "");
+  document.getElementById("stats").textContent = statsTxt;
+
+  // 周导航
+  const e = fmtMD(start) + " – " + fmtMD(addDays(start, 6));
+  document.getElementById("wkLabel").innerHTML =
+    "第 " + wkView + " / " + CFG.totalWeeks + " 周" +
+    (isCur ? " <small>本周 · " + fmtYMD(new Date()) + "</small>" : "") +
+    "<small>" + e + "</small>";
+  document.getElementById("backBtn").style.display = (isCur) ? "none" : "inline-block";
+
+  // 时间轴范围：本周有课的课程
+  let items = [];
+  const dayDates = [];
+  for(let i=0;i<7;i++) dayDates.push(addDays(start, i));
+  for(const c of courses){
+    for(let i=0;i<7;i++){
+      if(c.d === i+1 && onThisDay(c, wkView, dayDates[i])){
+        items.push({c:c, i:i});
+      }
+    }
+  }
+  items.sort((a,b)=> a.c.start === b.c.start ? a.c.end_time.localeCompare(b.c.end_time) : a.c.start.localeCompare(b.c.start));
+  let minS = 540, maxE = 1080;
+  if(items.length){
+    minS = 1440; maxE = 0;
+    for(const it of items){
+      const s = toMin(it.c.start), e2 = toMin(it.c.end_time);
+      if(s < minS) minS = s;
+      if(e2 > maxE) maxE = e2;
+    }
+  }
+  const K = 1.0;
+  const totalH = Math.round((maxE - minS) * K) + 4;
+
+  let html = "";
+  if(tasks.length){
+    html += "<div id='taskbar'>";
+    for(const t of tasks){
+      html += "<div class='task-item' onclick='showDetail(" + t.id + ")'>" +
+        "<span class='t-name'>📋 " + esc(t.name) + "</span>" +
+        (t.loc ? "<span class='t-meta'>📍 " + esc(t.loc) + "</span>" : "") +
+        (t.start ? "<span class='t-meta'>🕖 " + esc(t.start) + "–" + esc(t.end_time) + "</span>" : "") +
+        "<span class='t-due'>任选一天 · 截止 " + esc(taskWinTxt(t.wk)) + "</span></div>";
+    }
+    html += "</div>";
+  }
+  html += "<div class='cal-head'>";
+  for(let i=0;i<7;i++){
+    const d = dayDates[i];
+    const hol = holidayOn(d);
+    const isToday = isCur && i === todayIdx;
+    html += "<div class='cal-head-cell" + (isToday ? " today" : "") + "'>" + DAYS[i] +
+      "<span>" + fmtMD(d) + (hol ? " · <b class='hol'>" + esc(hol) + "</b>" : "") + "</span></div>";
+  }
+  html += "</div>";
+  html += "<div class='cal'>";
+  for(let i=0;i<7;i++){
+    const d = dayDates[i];
+    const hol = holidayOn(d);
+    const isToday = isCur && i === todayIdx;
+    const list = items.filter(it=>it.i===i).map(it=>it.c);
+    html += "<div class='cal-day" + (isToday ? " today" : "") + (hol ? " hol-day" : "") + "' style='height:" + totalH + "px'>";
+    if(hol){
+      html += "<div class='hol-banner'>🎉 " + esc(hol) + "放假</div>";
+    }else if(list.length === 0){
+      html += "<div class='cal-empty'>无课</div>";
+    }else{
+      const cards = list.map(c=>({
+        c: c,
+        top: Math.round((toMin(c.start) - minS) * K),
+        h: Math.max(Math.round((toMin(c.end_time) - toMin(c.start)) * K), 80)
+      }));
+      for(let j=0;j<cards.length;j++){
+        const it = cards[j];
+        html += calCard(it.c, it.top, it.h);
+        if(j < cards.length-1){
+          const next = cards[j+1];
+          const gapPx = next.top - (it.top + it.h);
+          if(gapPx >= 18){
+            const mid = it.top + it.h + gapPx/2;
+            const gapMins = toMin(next.c.start) - toMin(it.c.end_time);
+            html += "<div class='cal-gap' style='top:" + Math.round(mid) + "px'>" +
+              "<div class='arrow'>↕</div>间隔 " + Math.floor(gapMins/60) + "H" + (gapMins%60) + "min</div>";
+          }
+        }
+      }
+    }
+    html += "</div>";
+  }
+  html += "</div>";
+  document.getElementById("grid").innerHTML = html;
+}
+
+// ---------- 详情 / 编辑 ----------
+function showDetail(id){
+  const c = courses.find(x=>x.id===id);
+  if(!c) return;
+  const onceD = (c.wk && c.wk.indexOf("d:") === 0) ? c.wk.slice(2) : "";
+  document.getElementById("overlay").style.display = "block";
+  document.getElementById("popup").innerHTML =
+    "<h3 style='color:" + dayColor(c.name) + "'>" + esc(c.name) + "</h3>" +
+    "<p>📆 " + DAYS[c.d-1] + " " + c.start + " – " + c.end_time + "</p>" +
+    "<p>🗓️ 周次：" + esc(wkDetailTxt(c.wk)) + "</p>" +
+    "<p>📍 " + esc(c.loc || "未填") + "</p>" +
+    (c.remark ? "<p>📝 " + esc(c.remark) + "</p>" : "") +
+    "<p>👩‍🏫 " + esc(c.tea || "未填") + "</p>" +
+    (c.detail ? "<div class='detailbox'>📋 " + esc(c.detail) + "</div>" : "") +
+    (onceD && holidayOn(parseD(onceD)) ? "<p style='color:#e06c5f'>⚠️ 该日期在假期内，将自动停课</p>" : "") +
+    "<div style='margin-top:14px;text-align:right'>" +
+    "<button class='close' onclick='closeAll()'>关闭</button> " +
+    "<button class='editbtn' onclick='editCourse(" + c.id + ")'>✏️ 编辑</button> " +
+    "<button class='del' onclick='delCourse(" + c.id + ")'>删除</button></div>";
+  document.getElementById("popup").style.display = "block";
+}
+
+function showPanel(area){
+  closeAll();
+  document.getElementById("formArea").style.display = area === "form" ? "block" : "none";
+  document.getElementById("cfgArea").style.display = area === "cfg" ? "block" : "none";
+  document.getElementById("overlay").style.display = "block";
+  document.getElementById("panel").style.display = "block";
+}
+
+function openForm(){
+  editId = null;
+  document.getElementById("formTitle").textContent = "添加课程 / 活动";
+  document.getElementById("fDay").innerHTML = DAYS.map((d,i)=>"<option value='"+(i+1)+"'>"+d+"</option>").join("");
+  document.getElementById("fName").value = "";
+  document.getElementById("fStart").value = "09:00";
+  document.getElementById("fEnd").value = "10:20";
+  document.getElementById("fLoc").value = "";
+  document.getElementById("fTea").value = "";
+  document.getElementById("fDetail").value = "";
+  document.getElementById("fWk").value = "w";
+  wkSelectChange();
+  showPanel("form");
+}
+
+function editCourse(id){
+  const c = courses.find(x=>x.id===id);
+  if(!c) return;
+  editId = id;
+  document.getElementById("formTitle").textContent = "编辑课程 / 活动";
+  document.getElementById("fDay").innerHTML = DAYS.map((d,i)=>"<option value='"+(i+1)+"'"+(i+1===c.d?" selected":"")+">"+d+"</option>").join("");
+  document.getElementById("fName").value = c.name || "";
+  document.getElementById("fStart").value = c.start || "09:00";
+  document.getElementById("fEnd").value = c.end_time || "10:20";
+  document.getElementById("fLoc").value = c.loc || "";
+  document.getElementById("fTea").value = c.tea || "";
+  document.getElementById("fDetail").value = c.detail || "";
+  const wk = c.wk || "w";
+  if(wk === "o" || wk === "e"){ document.getElementById("fWk").value = wk; }
+  else if(wk.indexOf("l:") === 0){ document.getElementById("fWk").value = "l"; document.getElementById("fWkList").value = wk.slice(2); }
+  else if(wk.indexOf("d:") === 0){ document.getElementById("fWk").value = "d"; document.getElementById("fWkDate").value = wk.slice(2); }
+  else if(wk.indexOf("r:") === 0){
+    document.getElementById("fWk").value = "r";
+    const p = wk.slice(2).split("|");
+    document.getElementById("fWkA").value = p[0] || "";
+    document.getElementById("fWkB").value = p[1] || "";
+  }
+  else{ document.getElementById("fWk").value = "w"; }
+  wkSelectChange();
+  showPanel("form");
+}
+
+function wkSelectChange(){
+  const v = document.getElementById("fWk").value;
+  document.getElementById("fWkListRow").style.display = (v === "l") ? "block" : "none";
+  document.getElementById("fWkDateRow").style.display = (v === "d") ? "block" : "none";
+  document.getElementById("fWkRangeRow").style.display = (v === "r") ? "block" : "none";
+  if(v === "d" && !document.getElementById("fWkDate").value){
+    document.getElementById("fWkDate").value = fmtYMD(new Date()); // 默认今天
+  }
+  if(v === "r" && !document.getElementById("fWkA").value){
+    const d = new Date();
+    document.getElementById("fWkA").value = fmtYMD(d);
+    document.getElementById("fWkB").value = fmtYMD(addDays(d, 6));
+  }
+}
+function currentWkStr(){ return wkDetailTxt("l:" + wkView); }
+
+function saveCourse(){
+  const name = document.getElementById("fName").value.trim();
+  if(!name){ alert("请填写名称"); return; }
+  const mode = document.getElementById("fWk").value;
+  let wk = "w";
+  if(mode === "o") wk = "o";
+  else if(mode === "e") wk = "e";
+  else if(mode === "l"){
+    const t = document.getElementById("fWkList").value.trim();
+    if(!/^(\d+(-\d*)?)(,\d+(-\d*)?)*$/.test(t)){ alert("周次格式不对，示例：7-20 或 3,5,7-9"); return; }
+    wk = "l:" + t;
+  }else if(mode === "d"){
+    const t = document.getElementById("fWkDate").value;
+    if(!t){ alert("请选择日期"); return; }
+    wk = "d:" + t;
+  }else if(mode === "r"){
+    const a = document.getElementById("fWkA").value;
+    const b = document.getElementById("fWkB").value;
+    if(!a || !b){ alert("请选择开始与截止日期"); return; }
+    if(a > b){ alert("截止日期不能早于开始日期"); return; }
+    wk = "r:" + a + "|" + b;
+  }
+  const obj = {
+    d: +document.getElementById("fDay").value,
+    start: document.getElementById("fStart").value,
+    end_time: document.getElementById("fEnd").value,
+    name: name,
+    loc: document.getElementById("fLoc").value.trim(),
+    tea: document.getElementById("fTea").value.trim(),
+    detail: document.getElementById("fDetail").value.trim(),
+    wk: wk
+  };
+  if(editId){
+    const c = courses.find(x=>x.id===editId);
+    if(!c) return;
+    Object.assign(c, obj);
+  }else{
+    obj.id = Date.now() + Math.floor(Math.random()*9999);
+    courses.push(obj);
+  }
+  save(); closeAll(); render();
+}
+
+function delCourse(id){
+  if(!confirm("确定删除这项？")) return;
+  courses = courses.filter(x=>x.id!==id);
+  save(); closeAll(); render();
+}
+
+// ---------- 校历设置 ----------
+function openCfg(){
+  document.getElementById("cfgStart").value = CFG.termStart;
+  document.getElementById("cfgWeeks").value = CFG.totalWeeks;
+  document.getElementById("cfgHolidays").value =
+    CFG.holidays.map(h=>h.s + "," + h.e + "," + h.n).join("\n");
+  showPanel("cfg");
+}
+function saveCfg(){
+  const ts = document.getElementById("cfgStart").value;
+  if(!ts){ alert("请填写第1周日期"); return; }
+  const tw = Math.max(1, Math.min(30, +document.getElementById("cfgWeeks").value || 20));
+  const hs = [];
+  for(const line of document.getElementById("cfgHolidays").value.split("\n")){
+    const t = line.trim();
+    if(!t) continue;
+    const p = t.split(",");
+    if(p.length >= 2 && p[0] && p[1]){
+      hs.push({s:p[0].trim(), e:p[1].trim(), n:(p[2]||"").trim() || "假期"});
+    }
+  }
+  CFG.termStart = ts;
+  CFG.totalWeeks = tw;
+  CFG.holidays = hs;
+  try{ localStorage.setItem(cfgKey, JSON.stringify({termStart:ts, totalWeeks:tw, holidays:hs})); }catch(e){}
+  wkView = Math.max(1, Math.min(tw, wkView));
+  closeAll(); render();
+}
+
+function closeAll(){
+  document.getElementById("overlay").style.display = "none";
+  document.getElementById("popup").style.display = "none";
+  document.getElementById("panel").style.display = "none";
+}
+
+render();
+</script>
+</body>
+</html>
