@@ -55,15 +55,35 @@ h1{font-size:22px}
 .wkchip{position:absolute;top:2px;right:3px;background:rgba(0,0,0,.25);border-radius:4px;padding:0 4px;font-size:9px;line-height:1.5}
 .hol-banner{position:absolute;top:12px;left:0;right:0;text-align:center;color:#e06c5f;font-size:12px;font-weight:700}
 footer{text-align:center;color:#9aa4b8;font-size:12px;margin-top:12px}
-/* ===== 手机适配 ===== */
+/* ===== 手机适配：窄屏改为按天分块的纵向列表（无横向滚动） ===== */
 @media (max-width: 768px){
-  body{padding:10px}
+  body{padding:8px}
   h1{font-size:18px}
-  #wkbar{position:sticky;top:0;z-index:5;background:var(--bg);padding:6px 0}
-  .cal{overflow-x:auto}
-  .cal-day{min-width:132px}
-  .cal-head{overflow-x:auto}
-  .cal-head-cell{min-width:132px}
+  #wkbar{position:sticky;top:0;z-index:5;background:var(--bg);padding:6px 0;row-gap:6px}
+  .navbtn,.btn{padding:6px 11px;font-size:12.5px}
+  #wkLabel{font-size:13px;padding:4px 10px}
+  #wkLabel small{font-size:10px}
+  #panel{min-width:0;width:94vw}
+  #panel .row{flex-direction:column;gap:2px}
+  #popup{min-width:0;width:92vw}
+  /* render() 检测窄屏输出 calList 结构（天块纵列） */
+  #grid.calList{display:flex;flex-direction:column;gap:10px}
+  #grid.calList #taskbar{margin-bottom:0}
+  .md-day{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+  .md-day.today{background:var(--today);border-color:#eed9a0}
+  .md-day.hol-day{background:#fdf6f6;border-color:#f0dada}
+  .md-dhead{display:flex;align-items:baseline;gap:8px;font-weight:800;font-size:15px;color:#334155;padding-bottom:7px;border-bottom:1px dashed var(--line);margin-bottom:4px}
+  .md-day.today .md-dhead{color:#a06a00}
+  .md-dhead>span{font-size:12px;color:var(--muted);font-weight:normal}
+  .md-dhead .hol{color:#e06c5f;font-size:12px;font-weight:700;margin-left:auto}
+  .md-none{color:#c3c9d4;font-size:12px;padding:8px 2px}
+  .md-course{background:#fff;border-radius:10px;padding:9px 11px;margin:7px 0;box-shadow:0 1px 3px rgba(0,0,0,.07);cursor:pointer}
+  .md-course:active{transform:scale(.985)}
+  .md-t{font-size:12px;font-weight:700;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .md-t .md-chip{margin-left:auto;background:#eef2f9;color:#55627c;border-radius:5px;padding:1px 6px;font-size:10.5px;font-weight:700}
+  .md-n{font-weight:800;font-size:15px;margin:3px 0;word-break:break-word}
+  .md-n .md-sub{display:block;font-size:12.5px;font-weight:600;opacity:.85;margin-top:1px}
+  .md-l{font-size:12px;color:var(--muted)}
 }
 .retry{background:var(--accent);color:#fff;border:none;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer}
 #overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:10}
@@ -108,7 +128,7 @@ footer{text-align:center;color:#9aa4b8;font-size:12px;margin-top:12px}
   <button class="btn" id="addBtn" onclick="openForm()">＋ 添加</button>
 </div>
 <div id="grid"></div>
-<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.2.0</footer>
+<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.3.0</footer>
 </div>
 
 <div id="overlay" onclick="closeAll()"></div>
@@ -723,6 +743,9 @@ function render(){
     }
     html += "</div>";
   }
+  if(isMobile()){
+    html += buildMobileHTML(dayDates, items, isCur);   // 手机：按天分块列表，无横向滚动
+  }else{
   html += "<div class='cal-head'>";
   for(let i=0;i<7;i++){
     const d = dayDates[i];
@@ -767,7 +790,62 @@ function render(){
     html += "</div>";
   }
   html += "</div>";
+  }
+  document.getElementById("grid").className = isMobile() ? "calList" : "";
   document.getElementById("grid").innerHTML = html;
+}
+
+// ---------- 手机窄屏列表视图 ----------
+function isMobile(){
+  try{ return !!window.matchMedia && window.matchMedia("(max-width:768px)").matches; }catch(e){ return false; }
+}
+// 桌面 ⇄ 手机切换（resize 或跨过 768px）时自动重渲染
+let mqState = null, mqTimer = null;
+function onViewportChange(){
+  const m = isMobile();
+  clearTimeout(mqTimer);
+  if(m === mqState) return;   // 宽度变化但没跨模式 → 不重画（避免手机上滚动被打断）
+  mqState = m;
+  mqTimer = setTimeout(render, 120);
+}
+try{
+  const mql = window.matchMedia ? window.matchMedia("(max-width:768px)") : null;
+  if(mql && mql.addEventListener) mql.addEventListener("change", onViewportChange);
+}catch(e){}
+window.addEventListener("resize", onViewportChange);
+mqState = isMobile();
+
+function buildMobileHTML(dayDates, items, isCur){
+  let h = "";
+  for(let i=0;i<7;i++){
+    const d = dayDates[i];
+    const hol = holidayOn(d);
+    const isToday = isCur && i === todayIdx;
+    h += "<div class='md-day" + (isToday ? " today" : "") + (hol ? " hol-day" : "") + "'>" +
+      "<div class='md-dhead'>" + DAYS[i] + "<span>" + fmtMD(d) + "</span>" +
+      (hol ? "<span class='hol'>🎉 " + esc(hol) + "放假</span>" : "") + "</div>";
+    if(!hol){
+      const list = items.filter(it=>it.i===i).map(it=>it.c);
+      if(list.length) for(const c of list) h += mdCard(c);
+      else h += "<div class='md-none'>无课</div>";
+    }
+    h += "</div>";
+  }
+  return h;
+}
+function mdCard(c){
+  const sp = splitName(c.name);
+  const chip = wkLabelTxt(c.wk);
+  const col = dayColor(c.name);
+  const locs = [];
+  if(c.loc) locs.push("📍 " + esc(c.loc));
+  if(c.tea) locs.push("👨‍🏫 " + esc(c.tea));
+  return "<div class='md-course' style='border-left:4px solid " + col + "' onclick='showDetail(" + c.id + ")'>" +
+    "<div class='md-t'>" + c.start + "–" + c.end_time +
+    (chip ? "<span class='md-chip'>" + esc(chip) + "</span>" : "") + "</div>" +
+    "<div class='md-n' style='color:" + col + "'>" + esc(sp.main) +
+    (sp.sub ? "<span class='md-sub'>" + esc(sp.sub) + "</span>" : "") + "</div>" +
+    (locs.length ? "<div class='md-l'>" + locs.join(" · ") + "</div>" : "") + "</div>";
 }
 
 // ---------- 详情 / 编辑 ----------
