@@ -108,7 +108,7 @@ footer{text-align:center;color:#9aa4b8;font-size:12px;margin-top:12px}
   <button class="btn" id="addBtn" onclick="openForm()">＋ 添加</button>
 </div>
 <div id="grid"></div>
-<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.1.0</footer>
+<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.2.0</footer>
 </div>
 
 <div id="overlay" onclick="closeAll()"></div>
@@ -188,6 +188,12 @@ footer{text-align:center;color:#9aa4b8;font-size:12px;margin-top:12px}
       <div><button class="btn ghost" style="width:100%" onclick="syncDownloadBtn()">⬇️ 拉取云端</button></div>
       <div><button class="btn ghost" style="width:100%" onclick="syncUploadBtn()">⬆️ 上传本地（覆盖云端）</button></div>
     </div>
+    <label>📱 只读查看链接（手机直接打开就能看）</label>
+    <div class="row">
+      <div style="flex:3"><input id="sReadLink" readonly onclick="this.select()"></div>
+      <div style="flex:1"><button class="btn ghost" style="width:100%" onclick="copyReadLink()">复制</button></div>
+    </div>
+    <div class="hint">上课时用手机浏览器打开这个链接即可看到最新课表并自动刷新；手机上只能看、改不了（修改只在本电脑生效后上传）。</div>
     <div class="hint" id="cloudStatus" style="white-space:pre-line"></div>
     <div class="actions">
       <button class="close btn ghost" onclick="closeAll()">关闭</button>
@@ -341,9 +347,9 @@ function showToast(txt){
   t._tm = setTimeout(function(){ t.style.opacity = "0"; }, 3800);
   t.style.opacity = "1";
 }
-// 拉取云端并应用（返回是否真的更新了本机）
+// 拉取云端并应用（返回是否真的更新了本机）；无令牌=只读设备，仅允许拉取
 async function cloudPull(notify){
-  if(cloudBusy || !cloudCfg || !cloudCfg.token || !cloudCfg.gistId) return false;
+  if(cloudBusy || !cloudCfg || !cloudCfg.gistId) return false;
   cloudBusy = true;
   try{
     var g = await cloudApi("GET", "/gists/" + cloudCfg.gistId);
@@ -437,11 +443,35 @@ async function cloudPush(force){
   }finally{ cloudBusy = false; }
 }
 // ---------- 云同步界面 ----------
+function syncReadLink(){
+  var base;
+  try{ base = location.protocol === "file:" ? "https://pcsmiles.github.io/weekly-timetable/" : location.href.split("#")[0]; }catch(e){ base = "https://pcsmiles.github.io/weekly-timetable/"; }
+  return base + "#g=" + (cloudCfg ? cloudCfg.gistId : "");
+}
+function copyReadLink(){
+  var v = document.getElementById("sReadLink").value;
+  if(!v){ showToast("请先连接云同步，再复制只读链接"); return; }
+  var done = false;
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(v).then(function(){ showToast("📋 链接已复制，发到手机打开即可"); }).catch(function(){});
+      done = true;
+    }
+  }catch(e){}
+  if(!done){
+    var inp = document.getElementById("sReadLink");
+    inp.select();
+    try{ document.execCommand("copy"); showToast("📋 链接已复制，发到手机打开即可"); }catch(e){ showToast("请长按链接手动复制"); }
+  }
+}
 function openSyncPanel(){
   loadCloudCfg();
   document.getElementById("sToken").value = cloudCfg.token || "";
   document.getElementById("sAuto").value = String(cloudCfg.auto === 1 ? 1 : 0);
-  if(!cloudCfg.token){
+  document.getElementById("sReadLink").value = cloudCfg.gistId ? syncReadLink() : "";
+  if(!cloudCfg.token && cloudCfg.gistId){
+    cloudSetStatus("📱 只读模式已连接（gist …" + cloudCfg.gistId.slice(-6) + "）：可看课表，不能改", 0);
+  }else if(!cloudCfg.token){
     cloudSetStatus("未连接：粘贴 GitHub 令牌后点「保存并连接」。首次连接会自动在你的账号里创建私有 gist，之后所有设备共用同一份课表。", 2);
   }else if(!cloudCfg.gistId){
     cloudSetStatus("令牌已保存，正在连接…", 2);
@@ -485,9 +515,23 @@ async function syncDownloadBtn(){
 }
 function cloudInit(){
   loadCloudCfg();
+  // 只读查看链接：#g=gistId → 无需令牌也能拉取课表（只能看，不能改）
+  try{
+    var h = location.hash || "";
+    var mm = h.match(/#g=([A-Za-z0-9]+)/);
+    if(mm && mm[1] && mm[1] !== cloudCfg.gistId){
+      cloudCfg.gistId = mm[1];
+      cloudCfg.auto = 1;
+      saveCloudCfg();
+    }
+  }catch(e){}
   cloudReady = true;
-  if(!cloudCfg.token || cloudCfg.auto !== 1) return;
-  if(cloudCfg.gistId) setTimeout(function(){ cloudPull(false); }, 600);
+  if(cloudCfg.auto !== 1 || !cloudCfg.gistId) return;
+  if(cloudCfg.token){
+    setTimeout(function(){ cloudPull(false); }, 600);
+  }else{
+    setTimeout(function(){ cloudPull(true); }, 600);   // 只读设备：打开即拉取并提示
+  }
   setInterval(function(){ if(document.visibilityState === "visible") cloudPull(false); }, 90000);
   document.addEventListener("visibilitychange", function(){
     if(document.visibilityState === "visible") cloudPull(false);
