@@ -104,10 +104,11 @@ footer{text-align:center;color:#9aa4b8;font-size:12px;margin-top:12px}
   <button class="navbtn" id="backBtn" onclick="goCurWeek()" style="display:none">📌 回到本周</button>
   <span class="spacer"></span>
   <button class="btn ghost" id="cfgBtn" onclick="openCfg()">⚙️ 校历设置</button>
+  <button class="btn ghost" id="syncBtn" onclick="openSyncPanel()">☁️ 同步</button>
   <button class="btn" id="addBtn" onclick="openForm()">＋ 添加</button>
 </div>
 <div id="grid"></div>
-<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据仅保存在你自己的浏览器，绝不上传 · Ctrl+P 可打印<br>v1.0.0</footer>
+<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.1.0</footer>
 </div>
 
 <div id="overlay" onclick="closeAll()"></div>
@@ -170,6 +171,29 @@ footer{text-align:center;color:#9aa4b8;font-size:12px;margin-top:12px}
       <button class="btn" onclick="saveCfg()">保存</button>
     </div>
   </div>
+  <div id="syncArea" style="display:none">
+    <h3>☁️ 云同步（多设备）</h3>
+    <label>同步令牌（GitHub Token，只勾选 gist 权限）</label>
+    <input id="sToken" type="password" placeholder="github_pat_… 或 ghp_…">
+    <div class="hint">① 点 <a href="https://github.com/settings/tokens/new?scopes=gist&description=course-timetable-sync" target="_blank" rel="noopener">这里</a> 生成令牌（登录 GitHub，勾选唯一一项 <b>gist</b>，把生成的令牌粘贴到上框）<br>
+    ② 点「保存并连接」：课表存入<b>你自己的私有 gist</b>（不公开），这台设备从此自动同步<br>
+    ③ 另一台电脑 / 手机：打开同一个网页 → 同样操作 → 自动拉到同一份课表，改动互相可见<br>
+    令牌只存在本机浏览器，不进代码、不上传仓库；可随时在 GitHub「Settings → Developer settings」撤销</div>
+    <label>自动同步</label>
+    <select id="sAuto">
+      <option value="1">开启：改动后自动上传；回到页面 / 每 90 秒自动检查云端</option>
+      <option value="0">手动：只在点下面两个按钮时同步</option>
+    </select>
+    <div class="row" style="margin-top:10px">
+      <div><button class="btn ghost" style="width:100%" onclick="syncDownloadBtn()">⬇️ 拉取云端</button></div>
+      <div><button class="btn ghost" style="width:100%" onclick="syncUploadBtn()">⬆️ 上传本地（覆盖云端）</button></div>
+    </div>
+    <div class="hint" id="cloudStatus" style="white-space:pre-line"></div>
+    <div class="actions">
+      <button class="close btn ghost" onclick="closeAll()">关闭</button>
+      <button class="btn" onclick="syncSaveCfg()">保存并连接</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -205,7 +229,10 @@ try{
   if(raw) courses = JSON.parse(raw);
 }catch(e){ courses = []; }
 for(const c of courses){ if(!c.id) c.id = Math.floor(Math.random()*1000000000) + Date.now()%1000000; }
-function save(){ localStorage.setItem(storeKey, JSON.stringify(courses)); }
+function save(){
+  localStorage.setItem(storeKey, JSON.stringify(courses));
+  cloudMarkDirty();
+}
 
 // URL 参数快速添加：?add=名称|星期|开始|结束|地点|周次|备注   （周次可空=每周；单次如 d:2026-09-08）
 (function(){
@@ -227,6 +254,246 @@ function save(){ localStorage.setItem(storeKey, JSON.stringify(courses)); }
     }
   }catch(e){}
 })();
+
+// ========== ☁️ 云同步（可选）：数据存到你自己的 GitHub 私有 gist，多设备共用一份 ==========
+// 用法：点右上「☁️ 同步」→ 生成一个「只勾选 gist」的 GitHub 令牌 → 粘贴 → 保存并连接。
+// 令牌只存在本机浏览器 localStorage，不进代码、不上传仓库；可在 GitHub 随时撤销。
+var cloudReady = false, cloudApplying = false, cloudBusy = false;
+var cloudCfg = null, cloudTimer = null, cloudLocalAt = 0;
+var cloudKey = "timetable.sync.v23";
+var cloudDesc = "course-timetable-sync";
+var cloudFile = "timetable.json";
+function cloudRandId(){
+  var s = "", cs = "abcdef0123456789";
+  for(var i = 0; i < 8; i++) s += cs[Math.floor(Math.random() * 16)];
+  return s;
+}
+function loadCloudCfg(){
+  cloudCfg = null;
+  try{ var raw = localStorage.getItem(cloudKey); if(raw) cloudCfg = JSON.parse(raw); }catch(e){}
+  if(!cloudCfg){ cloudCfg = { token:"", gistId:"", auto:1, baseAt:0, device:cloudRandId() }; saveCloudCfg(); }
+  if(!cloudCfg.device) cloudCfg.device = cloudRandId();
+  if(cloudCfg.auto === undefined) cloudCfg.auto = 1;
+  if(!cloudCfg.baseAt) cloudCfg.baseAt = 0;
+  return cloudCfg;
+}
+function saveCloudCfg(){ try{ localStorage.setItem(cloudKey, JSON.stringify(cloudCfg)); }catch(e){} }
+function fmtTime(d){
+  function p(n){ return (n < 10 ? "0" : "") + n; }
+  return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+}
+// 本机任何改动都会走 save() → 延迟自动上传
+function cloudMarkDirty(){
+  try{
+    if(!cloudReady || cloudApplying) return;
+    if(!cloudCfg || !cloudCfg.token || cloudCfg.auto !== 1) return;
+    cloudLocalAt = Date.now();
+    if(cloudTimer) clearTimeout(cloudTimer);
+    cloudTimer = setTimeout(function(){ cloudPush(false); }, 2200);
+  }catch(e){}
+}
+async function cloudApi(method, path, body){
+  var h = { "Accept": "application/vnd.github+json" };
+  if(cloudCfg && cloudCfg.token) h["Authorization"] = "Bearer " + cloudCfg.token;
+  if(body !== undefined) h["Content-Type"] = "application/json";
+  var ctrl = new AbortController();
+  var timer = setTimeout(function(){ ctrl.abort(); }, 20000);
+  try{
+    var res = await fetch("https://api.github.com" + path, {
+      method: method, headers: h, signal: ctrl.signal,
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    if(res.status === 401 || (res.status === 403 && path === "/user"))
+      throw new Error("令牌无效或已被撤销，请到 GitHub 重新生成（仅需勾选 gist）");
+    if(!res.ok){
+      var msg = "HTTP " + res.status;
+      try{ var j = await res.json(); if(j && j.message) msg = j.message; }catch(e){}
+      throw new Error(msg);
+    }
+    if(res.status === 204) return null;
+    return res.json();
+  }finally{ clearTimeout(timer); }
+}
+function cloudDocNow(){
+  return {
+    fmt: 1,
+    updatedAt: Date.now(),
+    device: cloudCfg.device,
+    courses: courses.map(function(c){ return Object.assign({}, c); }),
+    cfg: { termStart: CFG.termStart, totalWeeks: CFG.totalWeeks, holidays: CFG.holidays }
+  };
+}
+function cloudSetStatus(txt, kind){ // 0=成功 1=错误 2=提示
+  var el = document.getElementById("cloudStatus");
+  if(!el) return;
+  el.textContent = txt;
+  el.style.color = kind === 1 ? "#d9534f" : (kind === 0 ? "#2e9e5b" : "#8a93a6");
+}
+function showToast(txt){
+  var t = document.getElementById("toast");
+  if(!t){
+    t = document.createElement("div");
+    Object.assign(t.style, { position:"fixed", left:"50%", bottom:"26px", transform:"translateX(-50%)", background:"#1f2733", color:"#fff", padding:"9px 16px", borderRadius:"8px", fontSize:"13px", transition:"opacity .3s", pointerEvents:"none", zIndex:"20", maxWidth:"86vw", opacity:"0" });
+    document.body.appendChild(t);
+  }
+  t.textContent = txt;
+  clearTimeout(t._tm);
+  t._tm = setTimeout(function(){ t.style.opacity = "0"; }, 3800);
+  t.style.opacity = "1";
+}
+// 拉取云端并应用（返回是否真的更新了本机）
+async function cloudPull(notify){
+  if(cloudBusy || !cloudCfg || !cloudCfg.token || !cloudCfg.gistId) return false;
+  cloudBusy = true;
+  try{
+    var g = await cloudApi("GET", "/gists/" + cloudCfg.gistId);
+    var f = g.files && g.files[cloudFile];
+    if(!f || !f.content) throw new Error("云端 gist 中找不到 " + cloudFile);
+    var doc = JSON.parse(f.content);
+    if(!doc || doc.fmt !== 1 || !Array.isArray(doc.courses)) throw new Error("云端数据格式不兼容");
+    if(doc.updatedAt <= cloudCfg.baseAt) return false;
+    var overwrote = cloudLocalAt > 0 && doc.updatedAt > cloudLocalAt;
+    cloudApplying = true;
+    try{
+      courses = doc.courses.map(function(c){
+        if(!c.id) c.id = Date.now() + Math.floor(Math.random() * 9999);
+        return c;
+      });
+      if(doc.cfg && doc.cfg.termStart){
+        try{ localStorage.setItem(cfgKey, JSON.stringify(doc.cfg)); }catch(e){}
+        CFG.termStart = doc.cfg.termStart;
+        CFG.totalWeeks = doc.cfg.totalWeeks || CFG.totalWeeks;
+        if(Array.isArray(doc.cfg.holidays)) CFG.holidays = doc.cfg.holidays;
+      }
+      save();
+    }finally{ cloudApplying = false; }
+    cloudCfg.baseAt = doc.updatedAt;
+    saveCloudCfg();
+    wkView = Math.max(1, Math.min(CFG.totalWeeks, wkView));
+    render();
+    if(notify || overwrote){
+      showToast(overwrote
+        ? "☁️ 检测到另一台设备的更新，已采用云端版本（本机未上传的改动被覆盖，可用「上传本地」找回）"
+        : "☁️ 已同步云端最新课表（" + courses.length + " 门课）");
+    }
+    cloudSetStatus("上次同步 " + fmtTime(new Date()) + " · 共 " + courses.length + " 门课 · 设备 " + cloudCfg.device, 0);
+    return true;
+  }catch(e){
+    cloudSetStatus("拉取失败：" + e.message, 1);
+    return false;
+  }finally{ cloudBusy = false; }
+}
+// 确保云端 gist 存在：返回 "found"（已有）或 "created"（刚建）
+async function cloudEnsure(){
+  if(cloudCfg.gistId) return "found";
+  var list = await cloudApi("GET", "/gists?per_page=100");
+  for(var i = 0; i < list.length; i++){
+    if(list[i].description === cloudDesc && list[i].files && list[i].files[cloudFile]){
+      cloudCfg.gistId = list[i].id;
+      saveCloudCfg();
+      return "found";
+    }
+  }
+  var shell = { fmt:1, updatedAt:0, device:"", courses:[], cfg:{ termStart:"", totalWeeks:20, holidays:[] } };
+  var files0 = {};
+  files0[cloudFile] = { content: JSON.stringify(shell) };
+  var made = await cloudApi("POST", "/gists", { description: cloudDesc, public: false, files: files0 });
+  cloudCfg.gistId = made.id;
+  saveCloudCfg();
+  return "created";
+}
+// 上传本机课表；force=false 时若云端比本机新则改为拉取（防覆盖别人的新改动）
+async function cloudPush(force){
+  if(cloudBusy || !cloudCfg || !cloudCfg.token) return;
+  cloudBusy = true;
+  try{
+    var justCreated = false;
+    if(!cloudCfg.gistId){
+      justCreated = (await cloudEnsure()) === "created";
+    }
+    if(!force && !justCreated){
+      var g = await cloudApi("GET", "/gists/" + cloudCfg.gistId);
+      var f = g.files && g.files[cloudFile];
+      if(f && f.content){
+        var remote = null;
+        try{ remote = JSON.parse(f.content); }catch(e){}
+        if(remote && remote.fmt === 1 && remote.updatedAt > cloudCfg.baseAt && remote.updatedAt > (cloudLocalAt || 0)){
+          cloudBusy = false;
+          await cloudPull(true);
+          return;
+        }
+      }
+    }
+    var doc = cloudDocNow();
+    var files = {};
+    files[cloudFile] = { content: JSON.stringify(doc) };
+    await cloudApi("PATCH", "/gists/" + cloudCfg.gistId, { files: files });
+    cloudCfg.baseAt = doc.updatedAt;
+    cloudLocalAt = 0;
+    saveCloudCfg();
+    cloudSetStatus("已上传 " + fmtTime(new Date()) + " · " + courses.length + " 门课", 0);
+  }catch(e){
+    cloudSetStatus("上传失败：" + e.message, 1);
+  }finally{ cloudBusy = false; }
+}
+// ---------- 云同步界面 ----------
+function openSyncPanel(){
+  loadCloudCfg();
+  document.getElementById("sToken").value = cloudCfg.token || "";
+  document.getElementById("sAuto").value = String(cloudCfg.auto === 1 ? 1 : 0);
+  if(!cloudCfg.token){
+    cloudSetStatus("未连接：粘贴 GitHub 令牌后点「保存并连接」。首次连接会自动在你的账号里创建私有 gist，之后所有设备共用同一份课表。", 2);
+  }else if(!cloudCfg.gistId){
+    cloudSetStatus("令牌已保存，正在连接…", 2);
+  }else{
+    cloudSetStatus("已连接 · gist …" + cloudCfg.gistId.slice(-6) + " · 上次同步 " + (cloudCfg.baseAt ? fmtTime(new Date(cloudCfg.baseAt)) : "—") + " · 设备 " + cloudCfg.device, 0);
+  }
+  showPanel("sync");
+}
+async function syncSaveCfg(){
+  loadCloudCfg();
+  cloudCfg.token = document.getElementById("sToken").value.trim();
+  cloudCfg.auto = +document.getElementById("sAuto").value;
+  saveCloudCfg();
+  if(!cloudCfg.token){ cloudSetStatus("已保存（未连接：令牌为空）", 2); return; }
+  cloudSetStatus("正在连接 GitHub…", 2);
+  try{
+    await cloudApi("GET", "/user");
+    cloudSetStatus("令牌有效，正在同步课表…", 2);
+    var st = await cloudEnsure();
+    if(st === "created"){
+      await cloudPush(true);   // gist 刚建好 → 把本机课表传上去作为第一份
+    }else{
+      await cloudPull(true);   // 云端已有 → 拉到本机（不覆盖云端）
+    }
+    if(cloudCfg.gistId) showToast("☁️ 云同步已连接 · " + courses.length + " 门课就位");
+  }catch(e){
+    cloudSetStatus("连接失败：" + e.message, 1);
+  }
+}
+async function syncUploadBtn(){
+  loadCloudCfg();
+  if(!cloudCfg || !cloudCfg.token){ cloudSetStatus("请先粘贴令牌并「保存并连接」", 1); return; }
+  await cloudPush(true);
+  cloudSetStatus("已用本机课表覆盖云端（" + courses.length + " 门课）", 0);
+}
+async function syncDownloadBtn(){
+  loadCloudCfg();
+  if(!cloudCfg || !cloudCfg.token){ cloudSetStatus("请先粘贴令牌并「保存并连接」", 1); return; }
+  var applied = await cloudPull(true);
+  if(!applied) showToast("☁️ 云端没有新改动，本机已是最新");
+}
+function cloudInit(){
+  loadCloudCfg();
+  cloudReady = true;
+  if(!cloudCfg.token || cloudCfg.auto !== 1) return;
+  if(cloudCfg.gistId) setTimeout(function(){ cloudPull(false); }, 600);
+  setInterval(function(){ if(document.visibilityState === "visible") cloudPull(false); }, 90000);
+  document.addEventListener("visibilitychange", function(){
+    if(document.visibilityState === "visible") cloudPull(false);
+  });
+  window.addEventListener("focus", function(){ cloudPull(false); });
+}
 
 // ---------- 日期工具 ----------
 const DAY_MS = 86400000;
@@ -485,6 +752,7 @@ function showPanel(area){
   closeAll();
   document.getElementById("formArea").style.display = area === "form" ? "block" : "none";
   document.getElementById("cfgArea").style.display = area === "cfg" ? "block" : "none";
+  document.getElementById("syncArea").style.display = area === "sync" ? "block" : "none";
   document.getElementById("overlay").style.display = "block";
   document.getElementById("panel").style.display = "block";
 }
@@ -632,6 +900,7 @@ function closeAll(){
 }
 
 render();
+cloudInit();
 </script>
 </body>
 </html>
