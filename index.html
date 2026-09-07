@@ -125,10 +125,11 @@ footer{text-align:center;color:#9aa4b8;font-size:12px;margin-top:12px}
   <span class="spacer"></span>
   <button class="btn ghost" id="cfgBtn" onclick="openCfg()">⚙️ 校历设置</button>
   <button class="btn ghost" id="syncBtn" onclick="openSyncPanel()">☁️ 同步</button>
+  <button class="btn ghost" id="icsBtn" onclick="exportIcs()" title="导出 .ics 文件，导入手机系统日历">📅 导出</button>
   <button class="btn" id="addBtn" onclick="openForm()">＋ 添加</button>
 </div>
 <div id="grid"></div>
-<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.3.0</footer>
+<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.3.1</footer>
 </div>
 
 <div id="overlay" onclick="closeAll()"></div>
@@ -846,6 +847,84 @@ function mdCard(c){
     "<div class='md-n' style='color:" + col + "'>" + esc(sp.main) +
     (sp.sub ? "<span class='md-sub'>" + esc(sp.sub) + "</span>" : "") + "</div>" +
     (locs.length ? "<div class='md-l'>" + locs.join(" · ") + "</div>" : "") + "</div>";
+}
+
+// ---------- 导出 .ics 日历文件（导入手机系统日历） ----------
+function escIcs(s){ return String(s||"").replace(/([\\;,])/g, "\\$1").replace(/\n/g, "\\n"); }
+function icsFold(line){
+  const chunks = []; let cur = "", curB = 0;
+  for(const ch of line){
+    const b = new TextEncoder().encode(ch).length;
+    if(curB + b > 73){ chunks.push(cur); cur = ch; curB = b; }
+    else{ cur += ch; curB += b; }
+  }
+  chunks.push(cur);
+  return chunks.join("\r\n ");
+}
+function buildIcsContent(){
+  const totalW = CFG.totalWeeks || 20;
+  const term = termStartDate();
+  const padN = (x,w)=>{ x=String(x); while(x.length<(w||2)) x="0"+x; return x; };
+  const utc = (y,mo,da,h,mi) => new Date(Date.UTC(y,mo-1,da,h,mi) - 8*3600e3).toISOString().slice(0,19).replace(/[-:]/g,"") + "Z";
+  const wkT = (wk) => !wk||wk==="w" ? "每周" : wk==="o" ? "单周" : wk==="e" ? "双周" : wk.indexOf("l:")===0 ? "第 "+wk.slice(2)+" 周" : wk.indexOf("d:")===0 ? "单次" : "";
+  const now = new Date();
+  const lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//pcsmiles//WeeklyTimetable//CN","CALSCALE:GREGORIAN","METHOD:PUBLISH",
+    "X-WR-CALNAME:课程表 "+(CFG.termStart||"").slice(0,4)+"秋","X-WR-TIMEZONE:Asia/Shanghai"];
+  let ev = 0;
+  for(const c of courses){
+    if(c.wk && c.wk.indexOf("r:") === 0){   // 限时任务：窗口最后一天作全天截止提醒
+      const p = c.wk.slice(2).split("|");
+      const endD = p[1] ? parseD(p[1]) : term;
+      lines.push("BEGIN:VEVENT","UID:timetable-"+c.id+"-task@pcsmiles",
+        "DTSTAMP:"+utc(now.getFullYear(),now.getMonth()+1,now.getDate(),0,0),
+        "DTSTART;VALUE=DATE:"+fmtYMD(endD).replace(/-/g,""),
+        "DTEND;VALUE=DATE:"+fmtYMD(addDays(endD,1)).replace(/-/g,""),
+        "SUMMARY:📋 "+escIcs(c.name),"STATUS:CONFIRMED",
+        "DESCRIPTION:"+escIcs("限时任务：请在 "+(p[0]||"")+" ~ "+(p[1]||"")+" 期间任选一天完成"+(c.loc?"\n地点："+c.loc:"")+(c.detail?"\n"+c.detail:"")),
+        "END:VEVENT");
+      ev++; continue;
+    }
+    const sH = c.start ? +c.start.split(":")[0] : 0, sM = c.start ? +c.start.split(":")[1] : 0;
+    const eH = c.end_time ? +c.end_time.split(":")[0] : 0, eM = c.end_time ? +c.end_time.split(":")[1] : 0;
+    for(let n=1;n<=totalW;n++){
+      let date;
+      if(c.wk && c.wk.indexOf("d:") === 0){
+        date = parseD(c.wk.slice(2));
+        if(weekOfDate(date) !== n) continue;
+      }else{
+        if(!wkMatchN(c.wk, n)) continue;
+        date = addDays(term, (n-1)*7 + (c.d-1));
+      }
+      if(holidayOn(date)) continue;   // 假期停课（与页面显示一致）
+      const y = fmtYMD(date).replace(/-/g,"");
+      const desc = ["周次："+wkT(c.wk)+(c.wk&&c.wk.indexOf("d:")===0?"":" · 第 "+n+" 周"),
+        c.tea?"老师："+c.tea:"", c.loc?"地点："+c.loc:"", c.remark||"", c.detail||""].filter(Boolean).join("\n");
+      lines.push("BEGIN:VEVENT","UID:timetable-"+c.id+"-"+y+"-"+padN(sH)+padN(sM)+"@pcsmiles",
+        "DTSTAMP:"+utc(now.getFullYear(),now.getMonth()+1,now.getDate(),0,0),
+        "DTSTART:"+utc(date.getFullYear(),date.getMonth()+1,date.getDate(),sH,sM),
+        "DTEND:"+utc(date.getFullYear(),date.getMonth()+1,date.getDate(),eH,eM),
+        "SUMMARY:"+escIcs(c.name),(c.loc?"LOCATION:"+escIcs(c.loc):""),"STATUS:CONFIRMED",
+        "DESCRIPTION:"+escIcs(desc),
+        "BEGIN:VALARM","ACTION:DISPLAY","DESCRIPTION:上课提醒","TRIGGER:-PT15M","END:VALARM",
+        "END:VEVENT");
+      ev++;
+    }
+  }
+  lines.push("END:VCALENDAR");
+  if(!ev) return "";
+  return lines.map(icsFold).join("\r\n") + "\r\n";
+}
+function exportIcs(){
+  const ics = buildIcsContent();
+  if(!ics){ showToast("没有可导出的课程：请先「☁️ 同步」把课表拉到本页"); return; }
+  const blob = new Blob([ics], {type:"text/calendar;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "课程表-" + (CFG.termStart || "").slice(0,4) + "秋.ics";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  showToast("📅 已导出 " + (ics.split("BEGIN:VEVENT").length-1) + " 个日程，传到手机打开即可导入日历");
 }
 
 // ---------- 详情 / 编辑 ----------
