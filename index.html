@@ -129,7 +129,7 @@ footer{text-align:center;color:#9aa4b8;font-size:12px;margin-top:12px}
   <button class="btn" id="addBtn" onclick="openForm()">＋ 添加</button>
 </div>
 <div id="grid"></div>
-<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.3.2</footer>
+<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.3.3</footer>
 </div>
 
 <div id="overlay" onclick="closeAll()"></div>
@@ -209,12 +209,12 @@ footer{text-align:center;color:#9aa4b8;font-size:12px;margin-top:12px}
       <div><button class="btn ghost" style="width:100%" onclick="syncDownloadBtn()">⬇️ 拉取云端</button></div>
       <div><button class="btn ghost" style="width:100%" onclick="syncUploadBtn()">⬆️ 上传本地（覆盖云端）</button></div>
     </div>
-    <label>📱 只读查看链接（手机直接打开就能看）</label>
+    <label>🔗 全能同步链接（手机 / 任何设备打开就能增删课）</label>
     <div class="row">
       <div style="flex:3"><input id="sReadLink" readonly onclick="this.select()"></div>
       <div style="flex:1"><button class="btn ghost" style="width:100%" onclick="copyReadLink()">复制</button></div>
     </div>
-    <div class="hint">上课时用手机浏览器打开这个链接即可看到最新课表并自动刷新；手机上只能看、改不了（修改只在本电脑生效后上传）。</div>
+    <div class="hint">把这条链接发到自己的手机 / 平板 / 其他电脑，打开一次就自动连接，之后和本机一样：能加课、能删课、改动自动同步。<br>⚠️ 链接里带着你的钥匙（令牌），别公开发出去；想作废时去 GitHub 撤销令牌，再回来复制新链接即可。</div>
     <div class="hint" id="cloudStatus" style="white-space:pre-line"></div>
     <div class="actions">
       <button class="close btn ghost" onclick="closeAll()">关闭</button>
@@ -269,6 +269,8 @@ function save(){
     if(add){
       const p = add.split("|");
       if(p.length >= 4){
+        loadCloudCfg();
+        if(cloudCfg && cloudCfg.gistId && !cloudCfg.token) return;  // 只读链接：不写本地，防白改
         let wd = +p[1];
         const wk0 = p[5] || "w";
         if(wk0.indexOf("d:") === 0){   // 单次：星期列以日期为准，防"存了不显示"
@@ -473,7 +475,10 @@ async function cloudPush(force){
 function syncReadLink(){
   var base;
   try{ base = location.protocol === "file:" ? "https://pcsmiles.github.io/weekly-timetable/" : location.href.split("#")[0]; }catch(e){ base = "https://pcsmiles.github.io/weekly-timetable/"; }
-  return base + "#g=" + (cloudCfg ? cloudCfg.gistId : "");
+  // 有令牌 → 生成"全能链接"(带钥匙)：任何设备打开即自动连接，可增删并自动同步
+  var q = cloudCfg ? "#g=" + cloudCfg.gistId : "";
+  if(cloudCfg && cloudCfg.token) q += "&t=" + cloudCfg.token;
+  return base + q;
 }
 function copyReadLink(){
   var v = document.getElementById("sReadLink").value;
@@ -548,6 +553,12 @@ function cloudInit(){
     var mm = h.match(/#g=([A-Za-z0-9]+)/);
     if(mm && mm[1] && mm[1] !== cloudCfg.gistId){
       cloudCfg.gistId = mm[1];
+      cloudCfg.auto = 1;
+      saveCloudCfg();
+    }
+    var tm = h.match(/[?&]t=([A-Za-z0-9_\-]+)/);
+    if(tm && tm[1] && tm[1] !== cloudCfg.token){
+      cloudCfg.token = tm[1];   // 全能链接自带钥匙：打开一次即连接，无需手动粘贴
       cloudCfg.auto = 1;
       saveCloudCfg();
     }
@@ -964,7 +975,18 @@ function showPanel(area){
   document.getElementById("panel").style.display = "block";
 }
 
+// 只读模式：打开了 #g= 旧链接（无钥匙）→ 只能看，防止"改了传不上去白改"
+function isReadOnlyMode(){
+  loadCloudCfg();
+  return !!(cloudCfg && cloudCfg.gistId && !cloudCfg.token);
+}
+function blockEdit(tip){
+  if(!isReadOnlyMode()) return false;
+  showToast(tip || "此链接为只读：用带钥匙的全能链接打开后才能改（☁️同步 → 复制链接）");
+  return true;
+}
 function openForm(){
+  if(blockEdit("只读链接不能添加：☁️同步面板里复制带钥匙的全能链接再打开一次")) return;
   editId = null;
   document.getElementById("formTitle").textContent = "添加课程 / 活动";
   document.getElementById("fDay").innerHTML = DAYS.map((d,i)=>"<option value='"+(i+1)+"'>"+d+"</option>").join("");
@@ -980,6 +1002,7 @@ function openForm(){
 }
 
 function editCourse(id){
+  if(blockEdit()) return;
   const c = courses.find(x=>x.id===id);
   if(!c) return;
   editId = id;
@@ -1075,6 +1098,7 @@ function saveCourse(){
 }
 
 function delCourse(id){
+  if(blockEdit()) return;
   if(!confirm("确定删除这项？")) return;
   courses = courses.filter(x=>x.id!==id);
   save(); closeAll(); render();
