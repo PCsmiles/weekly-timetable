@@ -129,7 +129,7 @@ footer{text-align:center;color:#9aa4b8;font-size:12px;margin-top:12px}
   <button class="btn" id="addBtn" onclick="openForm()">＋ 添加</button>
 </div>
 <div id="grid"></div>
-<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.3.1</footer>
+<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.3.2</footer>
 </div>
 
 <div id="overlay" onclick="closeAll()"></div>
@@ -269,11 +269,17 @@ function save(){
     if(add){
       const p = add.split("|");
       if(p.length >= 4){
+        let wd = +p[1];
+        const wk0 = p[5] || "w";
+        if(wk0.indexOf("d:") === 0){   // 单次：星期列以日期为准，防"存了不显示"
+          const q = wk0.slice(2).split("-");
+          wd = (new Date(+q[0], +q[1]-1, +q[2]).getDay()+6)%7+1;
+        }
         courses.push({
           id: Date.now(),
-          name: p[0], d: +p[1], start: p[2], end_time: p[3],
+          name: p[0], d: wd, start: p[2], end_time: p[3],
           loc: p[4] || "", tea: "",
-          wk: p[5] || "w", detail: p[6] || ""
+          wk: wk0, detail: p[6] || ""
         });
         save();
         history.replaceState(null, "", location.pathname);
@@ -1037,6 +1043,15 @@ function saveCourse(){
     if(!a || !b){ alert("请选择开始与截止日期"); return; }
     if(a > b){ alert("截止日期不能早于开始日期"); return; }
     wk = "r:" + a + "|" + b;
+  }
+  if(mode === "d"){
+    // 单次活动以日期为准：星期列自动对齐日期的真实周几（否则课程会保存成功但永远不显示）
+    const wd = (parseD(wk.slice(2)).getDay()+6)%7+1;
+    const el = document.getElementById("fDay");
+    if(+el.value !== wd){
+      el.value = wd;
+      showToast("已按所选日期自动对齐到" + DAYS[wd-1] + "列");
+    }
   }
   const obj = {
     d: +document.getElementById("fDay").value,
