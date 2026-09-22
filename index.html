@@ -46,12 +46,13 @@ h1{font-size:22px}
 .cal-empty{position:absolute;top:8px;left:0;right:0;text-align:center;color:#c3c9d4;font-size:12px}
 .cal-gap{position:absolute;left:0;right:0;text-align:center;color:#a5b0c2;font-size:10px;line-height:1.35;transform:translateY(-50%);pointer-events:none}
 .cal-gap .arrow{font-size:14px;display:block}
-.cal-course{position:absolute;left:4px;right:4px;border-radius:8px;padding:6px 9px;font-size:11px;cursor:pointer;color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.18);overflow:hidden;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}
-.cal-course .time{font-size:10.5px;font-weight:600;opacity:.95}
-.cal-course .name{font-weight:800;font-size:16px;margin:3px 0;text-shadow:0 1px 2px rgba(0,0,0,.2);word-break:break-word;max-width:100%}
-.cal-course .name .sub{display:block;font-size:13.5px;font-weight:600;opacity:.95;margin-top:1px}
-.cal-course .dur{font-size:10px;opacity:.9}
-.cal-course .loc{opacity:.92;font-size:10px;margin-top:1px}
+.cal-course{position:absolute;left:4px;right:4px;border-radius:8px;padding:5px 8px;font-size:11px;line-height:1.18;cursor:pointer;color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.18);overflow:hidden;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;--fs:1}
+.cal-course .cc-in{width:100%}
+.cal-course .time{font-size:calc(10.5px * var(--fs));font-weight:600;opacity:.95}
+.cal-course .name{font-weight:800;font-size:calc(16px * var(--fs));margin:2px 0;text-shadow:0 1px 2px rgba(0,0,0,.2);word-break:break-word;max-width:100%}
+.cal-course .name .sub{display:block;font-size:calc(13.5px * var(--fs));font-weight:600;opacity:.95;margin-top:1px}
+.cal-course .dur{font-size:calc(10px * var(--fs));opacity:.9}
+.cal-course .loc{opacity:.92;font-size:calc(10px * var(--fs));margin-top:1px}
 .wkchip{position:absolute;top:2px;right:3px;background:rgba(0,0,0,.25);border-radius:4px;padding:0 4px;font-size:9px;line-height:1.5}
 .hol-banner{position:absolute;top:12px;left:0;right:0;text-align:center;color:#e06c5f;font-size:12px;font-weight:700}
 footer{text-align:center;color:#9aa4b8;font-size:12px;margin-top:12px}
@@ -129,7 +130,7 @@ footer{text-align:center;color:#9aa4b8;font-size:12px;margin-top:12px}
   <button class="btn" id="addBtn" onclick="openForm()">＋ 添加</button>
 </div>
 <div id="grid"></div>
-<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.3.5</footer>
+<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.3.6</footer>
 </div>
 
 <div id="overlay" onclick="closeAll()"></div>
@@ -754,16 +755,48 @@ function calCard(c, top, h){
   const mins = toMin(c.end_time) - toMin(c.start);
   const dur = Math.floor(mins/60) + "H" + (mins%60) + "min";
   const locTxt = c.loc ? "地点：" + esc(c.loc) : (c.tea ? "老师：" + esc(c.tea) : "");
-  const compact = h < 72;
   const sp = splitName(c.name);
   const chip = wkLabelTxt(c.wk);
+  // 信息一条都不省（时间 / 名称 / 时长 / 地点），高度不够时由 fitCards() 自动缩字号
   return "<div class='cal-course' style='background:" + dayColor(c.name) + ";top:" + top + "px;height:" + h + "px' onclick='showDetail(" + c.id + ")'>" +
     (chip ? "<span class='wkchip'>" + esc(chip) + "</span>" : "") +
+    "<div class='cc-in'>" +
     "<div class='time'>时间：" + c.start + "–" + c.end_time + "</div>" +
     "<div class='name'>" + esc(sp.main) +
     (sp.sub ? "<span class='sub'>" + esc(sp.sub) + "</span>" : "") + "</div>" +
-    (!compact ? "<div class='dur'>时长：" + dur + "</div>" : "") +
-    (!compact && locTxt ? "<div class='loc'>" + locTxt + "</div>" : "") + "</div>";
+    "<div class='dur'>时长：" + dur + "</div>" +
+    (locTxt ? "<div class='loc'>" + locTxt + "</div>" : "") + "</div></div>";
+}
+
+// 卡片自适应：字号按可用高度缩放，保证四项信息永远排得下、不溢出、不裁剪。
+// 只有缩到下限仍装不下时才舍弃「时长」（时间区间本身已含时长）；地点永不省。
+function fitCards(){
+  const cards = document.querySelectorAll(".cal-course");
+  for(const el of cards){
+    const inner = el.querySelector(".cc-in");
+    if(!inner) continue;
+    const box = el.clientHeight - 10;            // 扣掉上下内边距
+    const fits = ()=> inner.getBoundingClientRect().height <= box + 0.5;
+    let s = 1;
+    el.style.setProperty("--fs", "1");
+    const need = inner.getBoundingClientRect().height;
+    if(need > box){                              // 先按比例一次算到位，再逐步微调
+      s = Math.max(0.62, Math.min(1, (box / need) * 0.98));
+      el.style.setProperty("--fs", s.toFixed(2));
+    }
+    for(let i=0;i<3 && !fits(); i++){
+      s = Math.max(0.62, s - 0.05);
+      el.style.setProperty("--fs", s.toFixed(2));
+    }
+    if(!fits()){
+      const d = el.querySelector(".dur");
+      if(d) d.style.display = "none";
+      for(let i=0;i<3 && !fits(); i++){
+        s = Math.max(0.62, s - 0.05);
+        el.style.setProperty("--fs", s.toFixed(2));
+      }
+    }
+  }
 }
 
 function render(){
@@ -849,11 +882,16 @@ function render(){
     }else if(list.length === 0){
       html += "<div class='cal-empty'>无课</div>";
     }else{
-      const cards = list.map(c=>({
-        c: c,
-        top: Math.round((Math.max(toMin(c.start), minS) - minS) * K),
-        h: Math.max(Math.round((Math.min(toMin(c.end_time), maxE) - Math.max(toMin(c.start), minS)) * K), 58)
-      }));
+      const cards = list.map(c=>{
+        const s0 = Math.max(toMin(c.start), minS), e0 = Math.min(toMin(c.end_time), maxE);
+        return { c: c, top: Math.round((s0 - minS) * K), h: Math.round((e0 - s0) * K) };
+      });
+      // 矮课卡片抬高到 66px 才好排下「时间/名称/时长/地点」，但绝不越过下一节课的位置（也不越过列底）
+      for(let j=0;j<cards.length;j++){
+        if(cards[j].h >= 66) continue;
+        const room = (j < cards.length-1 ? cards[j+1].top : totalH) - cards[j].top - 2;
+        cards[j].h = Math.max(Math.min(66, room), 30);
+      }
       for(let j=0;j<cards.length;j++){
         const it = cards[j];
         html += calCard(it.c, it.top, it.h);
@@ -875,6 +913,7 @@ function render(){
   }
   document.getElementById("grid").className = isMobile() ? "calList" : "";
   document.getElementById("grid").innerHTML = html;
+  if(!isMobile()) fitCards();   // 桌面视图：卡片字号自适应，杜绝文字溢出/裁切
 }
 
 // ---------- 手机窄屏列表视图 ----------
