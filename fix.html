@@ -1,0 +1,12 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>课表连接修复</title></head><body>
+<p id="s">正在修复课表连接…</p>
+<script>
+try {
+  localStorage.setItem('timetable.sync.v23', '{"token":"","gistId":"8333477ac1708365860e6f92ac188119","auto":1,"baseAt":0,"device":"5769d126"}');
+  document.getElementById('s').textContent = '修复完成，正在打开课表…';
+} catch (e) {
+  document.getElementById('s').textContent = '修复失败：' + e.message;
+}
+setTimeout(function(){ location.replace('https://pcsmiles.github.io/weekly-timetable/#g=8333477ac1708365860e6f92ac188119'); }, 800);
+</script>
+</body></html>
