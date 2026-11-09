@@ -130,7 +130,7 @@ footer{text-align:center;color:#9aa4b8;font-size:12px;margin-top:12px}
   <button class="btn" id="addBtn" onclick="openForm()">＋ 添加</button>
 </div>
 <div id="grid"></div>
-<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.3.6</footer>
+<footer>按周查看 · 点课程卡片可查看/编辑/删除 · 假期自动停课 · 数据默认仅保存在你自己的浏览器 · 「☁️ 同步」可把课表存入你自己的 GitHub 私有 gist（令牌也只存本机，可随时撤销） · Ctrl+P 可打印<br>v1.3.7</footer>
 </div>
 
 <div id="overlay" onclick="closeAll()"></div>
@@ -300,6 +300,8 @@ var cloudCfg = null, cloudTimer = null, cloudLocalAt = 0;
 var cloudKey = "timetable.sync.v23";
 var cloudDesc = "course-timetable-sync";
 var cloudFile = "timetable.json";
+// 只读设备拉取专用：gist 直链（gist.githubusercontent.com）不限匿名 API 的 60 次/小时
+var cloudOwner = "PCsmiles";
 function cloudRandId(){
   var s = "", cs = "abcdef0123456789";
   for(var i = 0; i < 8; i++) s += cs[Math.floor(Math.random() * 16)];
@@ -345,6 +347,8 @@ async function cloudApi(method, path, body){
     if(!res.ok){
       var msg = "HTTP " + res.status;
       try{ var j = await res.json(); if(j && j.message) msg = j.message; }catch(e){}
+      if(res.status === 403 && /rate limit/i.test(msg))
+        msg = "GitHub 匿名接口已限流（每小时 60 次，只读链接共用同一出口 IP 时很容易打满），稍后自动恢复";
       throw new Error(msg);
     }
     if(res.status === 204) return null;
@@ -378,15 +382,32 @@ function showToast(txt){
   t._tm = setTimeout(function(){ t.style.opacity = "0"; }, 3800);
   t.style.opacity = "1";
 }
+async function cloudFetchDoc(){
+  // 只读设备（无令牌）：优先走 gist 直链，避开 api.github.com 匿名 60 次/小时限流
+  if(cloudCfg && !cloudCfg.token && cloudCfg.gistId){
+    try{
+      var raw = "https://gist.githubusercontent.com/" + (cloudCfg.owner || cloudOwner) +
+                "/" + cloudCfg.gistId + "/raw/" + cloudFile;
+      var res = await fetch(raw);
+      if(res.ok){
+        var j = await res.json();
+        if(j && j.fmt === 1 && Array.isArray(j.courses)) return j;
+      }
+    }catch(e){ /* 直链失败再回退 API */ }
+  }
+  var g = await cloudApi("GET", "/gists/" + cloudCfg.gistId);
+  var f = g.files && g.files[cloudFile];
+  if(!f || !f.content) throw new Error("云端 gist 中找不到 " + cloudFile);
+  if(g.owner && g.owner.login) { cloudCfg.owner = g.owner.login; saveCloudCfg(); }
+  return JSON.parse(f.content);
+}
 // 拉取云端并应用（返回是否真的更新了本机）；无令牌=只读设备，仅允许拉取
 async function cloudPull(notify){
   if(cloudBusy || !cloudCfg || !cloudCfg.gistId) return false;
   cloudBusy = true;
   try{
-    var g = await cloudApi("GET", "/gists/" + cloudCfg.gistId);
-    var f = g.files && g.files[cloudFile];
-    if(!f || !f.content) throw new Error("云端 gist 中找不到 " + cloudFile);
-    var doc = JSON.parse(f.content);
+    var prevCur = curWeek();
+    var doc = await cloudFetchDoc();
     if(!doc || doc.fmt !== 1 || !Array.isArray(doc.courses)) throw new Error("云端数据格式不兼容");
     if(doc.updatedAt <= cloudCfg.baseAt) return false;
     var overwrote = cloudLocalAt > 0 && doc.updatedAt > cloudLocalAt;
@@ -406,6 +427,8 @@ async function cloudPull(notify){
     }finally{ cloudApplying = false; }
     cloudCfg.baseAt = doc.updatedAt;
     saveCloudCfg();
+    // 校历随云更新后要重算「当前周」，否则首次打开会停在第 1 周（看着像没有课）
+    if(wkView === prevCur) wkView = curWeek();
     wkView = Math.max(1, Math.min(CFG.totalWeeks, wkView));
     render();
     if(notify || overwrote){
@@ -1259,3 +1282,4 @@ cloudInit();
 </script>
 </body>
 </html>
+
